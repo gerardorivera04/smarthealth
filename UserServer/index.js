@@ -69,10 +69,12 @@ app.post("/api/auth/signup", asyncHandler(async (req, res) => {
       return res.status(409).json({ error: "An account with this email already exists" });
     }
 
+    const role = email.toLowerCase().endsWith("@smarthealth.com") ? "admin" : "patient";
+
     const hashed = await bcrypt.hash(password, 10);
     const [u] = await conn.query(
-      "INSERT INTO users (email, password, role) VALUES (?, ?, 'patient')",
-      [email, hashed]
+      "INSERT INTO users (email, password, role) VALUES (?, ?, ?)",
+      [email, hashed, role]
     );
 
     const [p] = await conn.query(
@@ -83,13 +85,13 @@ app.post("/api/auth/signup", asyncHandler(async (req, res) => {
     await conn.commit();
 
     const token = jwt.sign(
-      { id: u.insertId, email, role: "patient", patientId: p.insertId, name },
+      { id: u.insertId, email, role, patientId: p.insertId, name },
       JWT_SECRET,
       { expiresIn: "7d" }
     );
     res.status(201).json({
       token,
-      user: { id: u.insertId, email, role: "patient", patientId: p.insertId, name },
+      user: { id: u.insertId, email, role, patientId: p.insertId, name },
     });
   } catch (err) {
     await conn.rollback();
@@ -702,6 +704,29 @@ app.put("/api/bills/:id", authenticateToken, requireAdmin, asyncHandler(async (r
   const [[row]] = await pool.query("SELECT * FROM bills WHERE Bill_ID = ?", [req.params.id]);
   if (!row) return res.status(404).json({ error: "Not found" });
   res.json(row);
+}));
+
+app.post("/api/bills/:id/pay", authenticateToken, asyncHandler(async (req, res) => {
+  const billId = req.params.id;
+  const [[bill]] = await pool.query(
+    `SELECT b.Bill_ID, b.Payment_Status, p.PatientID
+       FROM bills b
+       JOIN generates g ON g.Bill_ID = b.Bill_ID
+       JOIN admitted ad ON ad.AppointmentID = g.AppointmentID
+       JOIN patients p ON p.PatientID = ad.PatientID
+      WHERE b.Bill_ID = ?`,
+    [billId]
+  );
+  if (!bill) return res.status(404).json({ error: "Bill not found" });
+  if (req.user.role !== "admin" && bill.PatientID !== req.user.patientId) {
+    return res.status(403).json({ error: "Not your bill" });
+  }
+  if (bill.Payment_Status === "Paid") {
+    return res.status(400).json({ error: "Bill is already paid" });
+  }
+  await pool.query("UPDATE bills SET Payment_Status = 'Paid' WHERE Bill_ID = ?", [billId]);
+  const [[updated]] = await pool.query("SELECT * FROM bills WHERE Bill_ID = ?", [billId]);
+  res.json(updated);
 }));
 
 app.delete("/api/bills/:id", authenticateToken, requireAdmin, asyncHandler(async (req, res) => {

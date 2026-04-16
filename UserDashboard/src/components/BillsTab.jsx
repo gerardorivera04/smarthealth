@@ -62,6 +62,16 @@ export default function BillsTab({ user }) {
     }
   }
 
+  async function payBill(id) {
+    if (!confirm("Mark this bill as paid?")) return;
+    try {
+      await api.post(`/api/bills/${id}/pay`);
+      load();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
   async function remove(id) {
     if (!confirm("Delete bill?")) return;
     try {
@@ -127,7 +137,7 @@ export default function BillsTab({ user }) {
                 {isAdmin && <th className="py-2">Patient</th>}
                 <th className="py-2">Total</th>
                 <th className="py-2">Status</th>
-                {isAdmin && <th></th>}
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -164,9 +174,9 @@ export default function BillsTab({ user }) {
                       b.Payment_Status
                     )}
                   </td>
-                  {isAdmin && (
-                    <td className="py-2 text-right space-x-2 whitespace-nowrap">
-                      {editingId === b.Bill_ID ? (
+                  <td className="py-2 text-right space-x-2 whitespace-nowrap">
+                    {isAdmin ? (
+                      editingId === b.Bill_ID ? (
                         <>
                           <Button onClick={saveEdit}>Save</Button>
                           <Button variant="ghost" onClick={() => setEditingId(null)}>
@@ -182,9 +192,13 @@ export default function BillsTab({ user }) {
                             Delete
                           </Button>
                         </>
-                      )}
-                    </td>
-                  )}
+                      )
+                    ) : (
+                      b.Payment_Status !== "Paid" && (
+                        <Button onClick={() => payBill(b.Bill_ID)}>Pay</Button>
+                      )
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
