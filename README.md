@@ -1,99 +1,166 @@
-# SmartHealth
+# SmartHealth — Hospital Management System
 
-A health dashboard application with a React frontend and Express.js backend.
+A database-driven, web-based hospital management system. React frontend,
+Express.js REST API, MySQL backend (run in Docker).
 
-## Tech Stack
+## Schema (per ER diagram)
 
-- **Frontend:** React 19, Vite 8, Tailwind CSS 4, React Router 7
-- **Backend:** Express 5, SQLite (better-sqlite3), JWT authentication, bcryptjs
+**Entities (6):** Patient, Appointment, Doctor, Nurse, Treatment, Bill
+**Relationships (5):** Admitted, Generates, Occurs, Administers, Assists
 
-## Prerequisites
+```
+Patient(PatientID PK, Name, DOB, Email, Phone)
+Appointment(AppointmentID PK, Date, Time, Status, doctor_id FK→Doctor)
+Doctor(DoctorID PK, Name, Specialty, Department)
+Nurse(NurseID PK, Name, Department)
+Treatment(TreatmentCode PK, Description, Cost)
+Bill(Bill_ID PK, Payment_Status, Total_Amount)
 
-- [Node.js](https://nodejs.org/) (v18 or higher recommended)
-- npm
-
-## Getting Started
-
-### 1. Clone the repository
-
-```bash
-git clone https://github.com/gerardorivera04/smarthealth.git
-cd smarthealth
+Admitted(AppointmentID FK, PatientID FK)         -- 1 patient per appointment
+Generates(Bill_ID FK, AppointmentID FK)          -- 1:1 bill ↔ appointment
+Occurs(AppointmentID FK, TreatmentCode FK)       -- M:N appointment ↔ treatment
+Administers(TreatmentCode FK, DoctorID FK)       -- M:N doctor ↔ treatment
+Assists(NurseID FK, DoctorID FK)                 -- M:N nurse ↔ doctor
 ```
 
-### 2. Set up the backend
+A view `v_patient_visit_stats` rolls up per-patient visit counts, no-shows, and
+last-visit date. It powers the Patient Risk Analysis advanced function.
+
+A `users` table (email + bcrypt password + role) sits behind the patient record
+to support login. It's not part of the ERD but is required by the user
+authentication system requirement. Each `patients.user_id` links back to it.
+
+## Tech stack
+
+- **Frontend:** React 19, Vite, Tailwind CSS, React Router
+- **Backend:** Express 5, mysql2, JWT auth, bcryptjs
+- **Database:** MySQL 8 (built and run from `db/Dockerfile`)
+
+## Quick start
+
+### 1. Start MySQL
+
+```bash
+docker compose up -d --build
+```
+
+This builds the image from [db/Dockerfile](db/Dockerfile), runs MySQL on
+`localhost:3306`, applies [db/init.sql](db/init.sql), and seeds catalog data
+from [db/seed.sql](db/seed.sql).
+
+| Field    | Value          |
+|----------|----------------|
+| host     | 127.0.0.1      |
+| port     | 3306           |
+| database | smarthealth    |
+| user     | smarthealth    |
+| password | smarthealth_pw |
+
+### 2. Backend
 
 ```bash
 cd UserServer
 npm install
+npm run dev   # http://localhost:3001
 ```
 
-### 3. Set up the frontend
+### 3. Frontend
 
 ```bash
 cd UserDashboard
 npm install
+npm run dev   # http://localhost:5173
 ```
 
-### 4. Run the application
+### 4. Make yourself an admin (optional)
 
-Start both the backend and frontend in separate terminals:
+Sign up through the UI (creates a `users` row + `patients` row), then promote:
 
-**Terminal 1 — Backend (port 3001):**
-
-```bash
-cd UserServer
-npm run dev
+```sql
+UPDATE users SET role='admin' WHERE email='you@example.com';
 ```
 
-**Terminal 2 — Frontend (port 5173):**
+Admin accounts get extra tabs (Patients, Staffing) and can see all
+appointments, manage doctors/nurses/treatments, and generate bills.
 
-```bash
-cd UserDashboard
-npm run dev
-```
+## Functionality
 
-The frontend proxies API requests to the backend, so both must be running. Open [http://localhost:5173](http://localhost:5173) in your browser.
+### Basic functions (covered in the demo checklist)
 
-## Environment Variables
+- **Insert** — every entity has create forms in the dashboard.
+- **Search** — patients (by ID/name/phone/email), doctors (by name/department/
+  specialty), nurses (by name/department), treatments (by code/description),
+  appointments (by status).
+- **Multi-table join query** — `GET /api/appointments` joins
+  `appointments ⨝ doctors ⨝ admitted ⨝ patients ⨝ generates ⨝ bills`.
+- **Aggregate query** — `GET /api/reports/doctor-load` groups by doctor with
+  `COUNT(*)`, `SUM(...)` for completed appointments and billed totals.
+- **Update** — every list row has an Edit button.
+- **Delete** — every list row has a Delete button. FK violations return
+  human-readable errors (e.g. cannot delete a doctor with appointments).
 
-| Variable | Default | Description |
-|---|---|---|
-| `PORT` | `3001` | Backend server port |
-| `JWT_SECRET` | `smarthealth-dev-secret-change-in-production` | Secret for signing JWTs (change in production) |
+Other system requirements covered:
 
-## Available Scripts
+- **Doctor double-booking prevented** — `appointments` has a
+  `UNIQUE (doctor_id, Date, Time)` constraint and the API surfaces the conflict.
+- **Auto-billing** — `POST /api/bills` with no `Total_Amount` sums the costs
+  of all `Treatments` linked to the appointment via `Occurs`.
 
-### UserDashboard
+### Advanced function: Patient Risk Analysis
 
-| Command | Description |
-|---|---|
-| `npm run dev` | Start Vite dev server |
-| `npm run build` | Build for production |
-| `npm run preview` | Preview production build |
-| `npm run lint` | Run ESLint |
+`GET /api/insights/risk/:patientId` returns a 0–100 risk score with a
+`low / medium / high` band and a recommended health plan. The score combines:
 
-### UserServer
+1. **Total appointments** from `v_patient_visit_stats` (joins
+   `patients ⨝ admitted ⨝ appointments ⨝ occurs`).
+2. **Recent activity** — appointments in the last 90 days.
+3. **No-show rate** — `no_shows / total_appts`.
+4. **Treatment diversity** — `COUNT(DISTINCT TreatmentCode)`.
+5. **Recency of last visit** — days since `MAX(Date)`.
 
-| Command | Description |
-|---|---|
-| `npm start` | Start the server |
-| `npm run dev` | Start with file watching |
+A per-factor breakdown and a tailored health plan are shown on the Overview
+tab.
 
-## Project Structure
+## API summary
+
+All endpoints except signup/login require `Authorization: Bearer <token>`.
+Endpoints marked **(admin)** require `role='admin'`.
+
+| Method | Path                                          | Notes                                           |
+|--------|-----------------------------------------------|-------------------------------------------------|
+| POST   | /api/auth/signup                              | creates user + linked patient                   |
+| POST   | /api/auth/login                               |                                                 |
+| GET    | /api/auth/me                                  | user + patient                                  |
+| GET    | /api/patients                                 | scoped to self for patients                     |
+| POST   | /api/patients                                 | (admin)                                         |
+| PUT    | /api/patients/:id                             | self or admin                                   |
+| DELETE | /api/patients/:id                             | (admin)                                         |
+| CRUD   | /api/doctors                                  | read for all, write (admin)                     |
+| CRUD   | /api/nurses                                   | read for all, write (admin)                     |
+| CRUD   | /api/treatments                               | read for all, write (admin)                     |
+| CRUD   | /api/appointments                             | scoped to self for patients                     |
+| GET/POST/DELETE | /api/appointments/:id/treatments     | manage Occurs                                   |
+| CRUD   | /api/bills                                    | read scoped, write (admin); auto-sum from Occurs|
+| GET/POST/DELETE | /api/administers                     | manage Administers M:N (admin write)            |
+| GET/POST/DELETE | /api/assists                         | manage Assists M:N (admin write)                |
+| GET    | /api/reports/doctor-load                      | aggregate report (admin)                        |
+| GET    | /api/insights/risk/:patientId                 | **advanced function** — patient risk analysis   |
+
+## Project structure
 
 ```
 smarthealth/
-├── UserDashboard/       # React frontend
-│   ├── src/
-│   │   ├── pages/       # Landing, Login, Signup, Dashboard
-│   │   ├── App.jsx      # Router and route protection
-│   │   ├── main.jsx     # Entry point
-│   │   └── index.css    # Tailwind styles
-│   ├── vite.config.js
-│   └── package.json
-├── UserServer/          # Express backend
-│   ├── index.js         # Server, routes, and database setup
-│   └── package.json
-└── README.md
+├── db/                    # MySQL Docker image
+│   ├── Dockerfile
+│   ├── init.sql           # entities + relationship tables + view
+│   └── seed.sql           # doctors, nurses, treatments, M:N seeds
+├── docker-compose.yml
+├── UserServer/            # Express + mysql2 backend
+│   ├── index.js
+│   └── .env.example
+└── UserDashboard/         # React + Vite frontend
+    └── src/
+        ├── api.js
+        ├── pages/         # Landing, Login, Signup, Dashboard
+        └── components/    # one tab per entity / feature
 ```
