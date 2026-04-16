@@ -38,46 +38,37 @@ authentication system requirement. Each `patients.user_id` links back to it.
 
 ## Quick start
 
-### 1. Start MySQL
-
 ```bash
 docker compose up -d --build
 ```
 
-This builds the image from [db/Dockerfile](db/Dockerfile), runs MySQL on
-`localhost:3306`, applies [db/init.sql](db/init.sql), and seeds catalog data
-from [db/seed.sql](db/seed.sql).
+This single command starts all three services:
 
-| Field    | Value          |
-|----------|----------------|
-| host     | 127.0.0.1      |
-| port     | 3306           |
-| database | smarthealth    |
-| user     | smarthealth    |
-| password | smarthealth_pw |
+| Service    | Container                | URL                    |
+|------------|--------------------------|------------------------|
+| MySQL 8    | smarthealth-mysql        | localhost:3306         |
+| Backend    | smarthealth-backend      | localhost:3001         |
+| Frontend   | smarthealth-frontend     | **localhost:5173**     |
 
-### 2. Backend
+Open **http://localhost:5173** in a browser and sign up.
+
+### Stopping and resetting
 
 ```bash
-cd UserServer
-npm install
-npm run dev   # http://localhost:3001
+docker compose down        # stop containers, keep database data
+docker compose down -v     # stop containers AND wipe the database (fresh reset)
 ```
 
-### 3. Frontend
+After `down -v`, the next `up --build` re-runs
+[db/init.sql](db/init.sql) and [db/seed.sql](db/seed.sql) from scratch.
 
-```bash
-cd UserDashboard
-npm install
-npm run dev   # http://localhost:5173
-```
-
-### 4. Make yourself an admin (optional)
+### Make yourself an admin (optional)
 
 Sign up through the UI (creates a `users` row + `patients` row), then promote:
 
-```sql
-UPDATE users SET role='admin' WHERE email='you@example.com';
+```bash
+docker exec -it smarthealth-mysql mysql -u smarthealth -psmarthealth_pw smarthealth \
+  -e "UPDATE users SET role='admin' WHERE email='you@example.com';"
 ```
 
 Admin accounts get extra tabs (Patients, Staffing) and can see all
@@ -150,17 +141,20 @@ Endpoints marked **(admin)** require `role='admin'`.
 
 ```
 smarthealth/
-├── db/                    # MySQL Docker image
+├── docker-compose.yml         # single command runs all 3 services
+├── db/                        # MySQL Docker image
 │   ├── Dockerfile
-│   ├── init.sql           # entities + relationship tables + view
-│   └── seed.sql           # doctors, nurses, treatments, M:N seeds
-├── docker-compose.yml
-├── UserServer/            # Express + mysql2 backend
+│   ├── init.sql               # entities + relationship tables + view
+│   └── seed.sql               # doctors, nurses, treatments, M:N seeds
+├── UserServer/                # Express + mysql2 backend
+│   ├── Dockerfile
 │   ├── index.js
 │   └── .env.example
-└── UserDashboard/         # React + Vite frontend
+└── UserDashboard/             # React + Vite frontend
+    ├── Dockerfile             # multi-stage: build → nginx
+    ├── nginx.conf             # serves SPA, proxies /api to backend
     └── src/
         ├── api.js
-        ├── pages/         # Landing, Login, Signup, Dashboard
-        └── components/    # one tab per entity / feature
+        ├── pages/             # Landing, Login, Signup, Dashboard
+        └── components/        # one tab per entity / feature
 ```

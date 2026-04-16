@@ -20,5 +20,36 @@ services:
       timeout: 5s
       retries: 20
 
+  backend:
+    build:
+      context: ./UserServer
+      dockerfile: Dockerfile
+    container_name: smarthealth-backend
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      PORT: 3001
+      JWT_SECRET: temp-smarthealth-secret
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: smarthealth
+      DB_PASSWORD: smarthealth_pw
+      DB_NAME: smarthealth
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./UserDashboard
+      dockerfile: Dockerfile
+    container_name: smarthealth-frontend
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+
 volumes:
   smarthealth_mysql_data:
