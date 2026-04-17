@@ -52,6 +52,15 @@ This single command starts all three services:
 
 Open **http://localhost:5173** in a browser and sign up.
 
+### Verify services are running
+
+```bash
+docker compose ps
+docker compose logs -f backend
+```
+
+`docker compose ps` should show `mysql`, `backend`, and `frontend` as `Up`.
+
 ### Stopping and resetting
 
 ```bash
